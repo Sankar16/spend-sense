@@ -20,6 +20,11 @@ def build_window_features(txn: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFram
     # only expenses for spend-trend features
     win_exp = win[win["direction"] == "Expense"].copy()
 
+    # IMPORTANT: make expense magnitudes positive (canonical may store expense as negative)
+    win_exp["amount"] = pd.to_numeric(win_exp["amount"], errors="coerce")
+    win_exp = win_exp.dropna(subset=["amount"])
+    win_exp["amount"] = win_exp["amount"].abs()
+
     if win_exp.empty:
         return pd.DataFrame(columns=["as_of_date", "user_id"])
 
@@ -55,17 +60,21 @@ def build_window_features(txn: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFram
 
     # trend features
     out["expense_growth_7d"] = out["expense_last7"] - out["expense_prev7"]
-    out["expense_growth_ratio_7d"] = np.where(
-        out["expense_prev7"] > 0,
-        out["expense_last7"] / out["expense_prev7"],
-        np.where(out["expense_last7"] > 0, 2.0, 1.0),  # heuristic when prev7=0
-    )
+
+    eps = 1.0  # avoids divide-by-zero / tiny denominators
+    out["expense_growth_ratio_7d"] = (out["expense_last7"] + eps) / (out["expense_prev7"] + eps)
+
+    # optional: cap extreme ratios so one weird user doesn't dominate the model
+    out["expense_growth_ratio_7d"] = out["expense_growth_ratio_7d"].clip(0, 10)
 
     out["essentials_share_30d"] = np.where(
         out["expense_total_30d_check"] > 0,
         out["essentials_expense_30d"] / out["expense_total_30d_check"],
         0.0,
     )
+
+    # optional but good: enforce valid range for a "share"
+    out["essentials_share_30d"] = out["essentials_share_30d"].clip(0, 1)
 
     out = out.reset_index()
     out.insert(0, "as_of_date", as_of.date().isoformat())
