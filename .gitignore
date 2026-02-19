@@ -220,3 +220,6 @@ reports/figures/*.png
 # Jupyter exports
 *.nbconvert.ipynbreports/models/*.joblib
 reports/models/*.pkl
+
+reports/models/*.joblib
+reports/models/*.pkl

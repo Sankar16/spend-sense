@@ -28,6 +28,7 @@ class Paths:
 
 
 FEATURES_NUM = [
+    # existing
     "txn_count_30d",
     "active_days_30d",
     "income_total_30d",
@@ -38,6 +39,15 @@ FEATURES_NUM = [
     "median_expense_txn_30d",
     "expense_std_30d",
     "top_category_share_30d",
+
+    # NEW trend features (from mart_user_30d_trends)
+    "expense_last7",
+    "expense_prev7",
+    "large_txn_cnt_30d",
+    "essentials_expense_30d",
+    "expense_growth_7d",
+    "expense_growth_ratio_7d",
+    "essentials_share_30d",
 ]
 FEATURES_CAT = ["top_category_30d"]
 
