@@ -110,3 +110,14 @@ Saved under `reports/figures/`:
    - anomaly detection for unusual transactions
 3) Add **baseline forecasting**
    - short-horizon expense forecast per user/category
+
+## EDA Summary (SpendSense)
+
+### Key Findings
+- **Category standardization:** Normalized noisy category labels into a canonical set (e.g., Food/Rent/Utilities) using a mapping file + fallback handling for unknown labels.
+- **Skew & outliers:** Spending is highly concentrated — the top spender (**U008**) accounts for **85.2%** of total spend in the last 30 days.
+- **Dashboard design choice:** Added outlier-aware views (log-scale scatter + “Top users excluding #1”) so patterns among the remaining users are interpretable.
+
+### Implications
+- Aggregate KPIs are sensitive to a single high-spend user; reports should include both **overall** and **outlier-excluded** views.
+- For modeling/segmentation, consider winsorization (cap at p99) or robust scaling to reduce outlier dominance.
