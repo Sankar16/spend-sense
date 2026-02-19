@@ -81,9 +81,22 @@ def main():
     plt.savefig(fig_dir / "dashboard_page3_user_scatter.png", dpi=150)
     plt.close()
 
-    # -------- Page 3 preview: Top 10 users by expense --------
-    top_users = users.sort_values("expense_total_30d", ascending=False).head(10)
+    # Log-scale version (makes non-outliers visible)
+    plt.figure()
+    plt.scatter(users["expense_total_30d"], users["expense_std_30d"])
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.title("User Behavior (30d): Expense vs Volatility (Log Scale)")
+    plt.xlabel("Expense Total (30d) [log]")
+    plt.ylabel("Expense Std Dev (30d) [log]")
+    plt.tight_layout()
+    plt.savefig(fig_dir / "dashboard_page3_user_scatter_log.png", dpi=150)
+    plt.close()
 
+    # -------- Page 3 preview: Top 10 users by expense --------
+    users_sorted = users.sort_values("expense_total_30d", ascending=False)
+
+    top_users = users_sorted.head(10)
     plt.figure()
     plt.bar(top_users["user_id"], top_users["expense_total_30d"])
     plt.title("Top 10 Users by Expense (Last 30 Days)")
@@ -92,6 +105,24 @@ def main():
     plt.tight_layout()
     plt.savefig(fig_dir / "dashboard_page3_top_users.png", dpi=150)
     plt.close()
+
+    # Excluding the top-1 spender (so we can see the rest)
+    if len(users_sorted) > 1:
+        top_users_excl_top1 = users_sorted.iloc[1:11]
+        plt.figure()
+        plt.bar(top_users_excl_top1["user_id"], top_users_excl_top1["expense_total_30d"])
+        plt.title("Top 10 Users by Expense (Excluding #1)")
+        plt.xlabel("User")
+        plt.ylabel("Expense Total (30d)")
+        plt.tight_layout()
+        plt.savefig(fig_dir / "dashboard_page3_top_users_excl_top1.png", dpi=150)
+        plt.close()
+
+    # Stakeholder-friendly metric: top spender share of last-30-days spend
+    total_30d = users_sorted["expense_total_30d"].sum()
+    top_user = users_sorted.iloc[0]
+    share = (top_user["expense_total_30d"] / total_30d) if total_30d else 0
+    print(f"Top spender {top_user['user_id']} contributes {share:.1%} of last-30-days spend.")
 
     print("Dashboard preview images saved to reports/figures/")
 
