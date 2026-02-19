@@ -93,7 +93,7 @@ def main():
     plt.savefig(fig_dir / "dashboard_page3_top_users.png", dpi=150)
     plt.close()
 
-    print("✅ Dashboard preview images saved to reports/figures/")
+    print("Dashboard preview images saved to reports/figures/")
 
 
 if __name__ == "__main__":
