@@ -23,15 +23,10 @@ def add_classification_target(df: pd.DataFrame, positive_quantile: float = 0.80)
     return df
 """
 
-def add_spike_target(df: pd.DataFrame, positive_quantile: float = 0.80) -> pd.DataFrame:
-    # ratio of next 30d to last 30d (per row)
-    df["spike_ratio_next_30d"] = (df["next_30d_expense_total"] + 1.0) / (df["expense_total_30d"] + 1.0)
-
-    # threshold on spike ratio
-    thresh = df["spike_ratio_next_30d"].quantile(positive_quantile)
-    df["spend_spike_next_30d"] = (df["spike_ratio_next_30d"] >= thresh).astype(int)
-    df["spike_ratio_threshold"] = float(thresh)
-
+def add_spike_ratio(df: pd.DataFrame) -> pd.DataFrame:
+    df["spike_ratio_next_30d"] = (
+        (df["next_30d_expense_total"] + 1.0) / (df["expense_total_30d"] + 1.0)
+    ).clip(0, 50)   # <- cap extremes
     return df
 
 def compute_features_for_window(txns: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
@@ -178,17 +173,18 @@ def main() -> None:
 
     out = pd.concat(rows, ignore_index=True)
     out = merge_trend_features(out)
-    # out = add_classification_target(out, positive_quantile=0.80)
-    out = add_spike_target(out, positive_quantile=0.80)
+    out = add_spike_ratio(out)
+
+    # write dataset
     out.to_parquet(p.out_path, index=False)
 
+    print("spike_ratio stats:", out["spike_ratio_next_30d"].describe())
     print("✅ Wrote:", p.out_path)
     print("Date range:", min_date.date(), "→", max_date.date())
     print("as_of_dates:", len(as_of_dates), "| rows:", len(out))
-    # print("positive_rate:", round(out["high_spend_next_30d"].mean(), 3))
-    # print("threshold:", out["high_spend_threshold"].iloc[0])
-    print("positive_rate:", round(out["spend_spike_next_30d"].mean(), 3))
-    print("threshold:", out["spike_ratio_threshold"].iloc[0])
+
+    # info-only global quantile (NOT used for labeling)
+    print("spike_ratio q80 (global, info only):", float(out["spike_ratio_next_30d"].quantile(0.80)))
 
 
 if __name__ == "__main__":

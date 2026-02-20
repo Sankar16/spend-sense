@@ -218,8 +218,9 @@ reports/figures/*.png
 .DS_Store
 
 # Jupyter exports
-*.nbconvert.ipynbreports/models/*.joblib
-reports/models/*.pkl
+*.nbconvert.ipynb
 
+# Model artifacts + generated predictions
 reports/models/*.joblib
 reports/models/*.pkl
+reports/predictions*.csv
