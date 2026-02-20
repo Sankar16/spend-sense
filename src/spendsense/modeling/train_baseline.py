@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
@@ -18,6 +19,8 @@ from sklearn.metrics import (
 )
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.metrics import precision_recall_curve
+
 
 
 @dataclass(frozen=True)
@@ -84,10 +87,20 @@ def build_preprocessor():
         ]
     )
 
+def best_threshold_by_f1(y_true, proba):
+    precision, recall, thresholds = precision_recall_curve(y_true, proba)
+    # precision/recall arrays are len(thresholds)+1
+    f1 = (2 * precision * recall) / (precision + recall + 1e-12)
+    best_idx = np.argmax(f1)
+    # thresholds is shorter by 1, so handle edge
+    best_thresh = thresholds[max(best_idx - 1, 0)] if len(thresholds) else 0.5
+    return float(best_thresh), float(f1[best_idx]), float(precision[best_idx]), float(recall[best_idx])
 
 def evaluate(model, X_test, y_test, name: str):
     proba = model.predict_proba(X_test)[:, 1]
-    pred = (proba >= 0.5).astype(int)
+
+    best_thresh, best_f1, best_p, best_r = best_threshold_by_f1(y_test, proba)
+    pred = (proba >= best_thresh).astype(int)
 
     roc = roc_auc_score(y_test, proba)
     pr = average_precision_score(y_test, proba)
@@ -97,11 +110,23 @@ def evaluate(model, X_test, y_test, name: str):
     print(f"\n=== {name} ===")
     print("ROC-AUC:", round(roc, 4))
     print("PR-AUC:", round(pr, 4))
+    print("Best threshold (F1):", round(best_thresh, 4))
+    print("Best F1 (class 1):", round(best_f1, 4))
+    print("Precision@best:", round(best_p, 4), "| Recall@best:", round(best_r, 4))
     print("Accuracy:", round(acc, 4))
     print("Confusion matrix:\n", cm)
     print("\nReport:\n", classification_report(y_test, pred, digits=4))
 
-    return {"model": name, "roc_auc": roc, "pr_auc": pr, "accuracy": acc}
+    return {
+        "model": name,
+        "roc_auc": roc,
+        "pr_auc": pr,
+        "accuracy": acc,
+        "best_threshold_f1": best_thresh,
+        "best_f1_pos": best_f1,
+        "precision_pos": best_p,
+        "recall_pos": best_r,
+    }
 
 
 def main():
@@ -157,6 +182,10 @@ def main():
 
     print("\n✅ Saved metrics:", out_path)
     print(metrics_df)
+
+    thr_path = p.report_dir / "best_threshold_logreg.txt"
+    thr_path.write_text(str(lr_metrics["best_threshold_f1"]))
+    print("✅ Saved threshold:", thr_path)
 
 
 if __name__ == "__main__":
