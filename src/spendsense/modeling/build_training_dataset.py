@@ -6,19 +6,33 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+TRENDS_MART_PATH = Path("data/processed/mart_user_30d_trends.csv")
+
+
 
 @dataclass(frozen=True)
 class Paths:
     canonical_path: Path = Path("data/processed/transactions_clean.parquet")
     out_path: Path = Path("data/processed/training_dataset.parquet")
 
-
+"""
 def add_classification_target(df: pd.DataFrame, positive_quantile: float = 0.80) -> pd.DataFrame:
     thresh = df["next_30d_expense_total"].quantile(positive_quantile)
     df["high_spend_next_30d"] = (df["next_30d_expense_total"] >= thresh).astype(int)
     df["high_spend_threshold"] = float(thresh)
     return df
+"""
 
+def add_spike_target(df: pd.DataFrame, positive_quantile: float = 0.80) -> pd.DataFrame:
+    # ratio of next 30d to last 30d (per row)
+    df["spike_ratio_next_30d"] = (df["next_30d_expense_total"] + 1.0) / (df["expense_total_30d"] + 1.0)
+
+    # threshold on spike ratio
+    thresh = df["spike_ratio_next_30d"].quantile(positive_quantile)
+    df["spend_spike_next_30d"] = (df["spike_ratio_next_30d"] >= thresh).astype(int)
+    df["spike_ratio_threshold"] = float(thresh)
+
+    return df
 
 def compute_features_for_window(txns: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
     """User features for [start, end] inclusive."""
@@ -32,9 +46,10 @@ def compute_features_for_window(txns: pd.DataFrame, start: pd.Timestamp, end: pd
     income = (
         w[w["direction"] == "Income"].groupby("user_id")["amount"].sum().rename("income_total_30d")
     )
-    expense = (
-        w[w["direction"] == "Expense"].groupby("user_id")["amount"].sum().rename("expense_total_30d")
-    )
+    exp_rows = w[w["direction"] == "Expense"].copy()
+    exp_rows["amount"] = pd.to_numeric(exp_rows["amount"], errors="coerce").abs()
+
+    expense = exp_rows.groupby("user_id")["amount"].sum().rename("expense_total_30d")
     net = (income.fillna(0) - expense.fillna(0)).rename("net_total_30d")
 
     # diversity features (only expense side is ok too, but we’ll keep all)
@@ -42,7 +57,7 @@ def compute_features_for_window(txns: pd.DataFrame, start: pd.Timestamp, end: pd
     cat_div = w.groupby("user_id")["category"].nunique().rename("category_diversity_30d")
 
     # expense stats
-    exp_txn = w[w["direction"] == "Expense"].copy()
+    exp_txn = exp_rows  # instead of w[w["direction"] == "Expense"]
     med_exp = exp_txn.groupby("user_id")["amount"].median().rename("median_expense_txn_30d")
     std_exp = exp_txn.groupby("user_id")["amount"].std().rename("expense_std_30d")
 
@@ -76,17 +91,48 @@ def compute_features_for_window(txns: pd.DataFrame, start: pd.Timestamp, end: pd
     features["window_end"] = end.date()
     return features
 
-
 def compute_label_next_window(txns: pd.DataFrame, label_start: pd.Timestamp, label_end: pd.Timestamp) -> pd.DataFrame:
     """Next-window label (expense total) for [label_start, label_end] inclusive."""
     fut = txns[(txns["date"] >= label_start) & (txns["date"] <= label_end)].copy()
     fut = fut[fut["direction"] == "Expense"].copy()
 
-    labels = fut.groupby("user_id", as_index=False)["amount"].sum().rename(columns={"amount": "next_30d_expense_total"})
+    fut["amount"] = pd.to_numeric(fut["amount"], errors="coerce").abs()
+    fut = fut.dropna(subset=["amount"])
+
+    labels = (
+        fut.groupby("user_id", as_index=False)["amount"]
+        .sum()
+        .rename(columns={"amount": "next_30d_expense_total"})
+    )
     labels["label_window_start"] = label_start.date()
     labels["label_window_end"] = label_end.date()
     return labels
 
+def merge_trend_features(out: pd.DataFrame) -> pd.DataFrame:
+    trends = pd.read_csv(TRENDS_MART_PATH)
+
+    # Make join keys consistent
+    trends["as_of_date"] = pd.to_datetime(trends["as_of_date"]).dt.date.astype(str)
+    out["as_of_date"] = pd.to_datetime(out["as_of_date"]).dt.date.astype(str)
+
+    merged = out.merge(trends, on=["as_of_date", "user_id"], how="left")
+
+    trend_cols = [
+        "expense_last7",
+        "expense_prev7",
+        "large_txn_cnt_30d",
+        "essentials_expense_30d",
+        "expense_total_30d_check",
+        "expense_growth_7d",
+        "expense_growth_ratio_7d",
+        "essentials_share_30d",
+    ]
+    for c in trend_cols:
+        if c in merged.columns:
+            merged[c] = merged[c].fillna(0)
+
+    print("trend null rate:", merged[trend_cols].isna().mean().max())
+    return merged
 
 def main() -> None:
     p = Paths()
@@ -131,17 +177,18 @@ def main() -> None:
         rows.append(df)
 
     out = pd.concat(rows, ignore_index=True)
-
-    # classification target computed globally (simple baseline)
-    out = add_classification_target(out, positive_quantile=0.80)
-
+    out = merge_trend_features(out)
+    # out = add_classification_target(out, positive_quantile=0.80)
+    out = add_spike_target(out, positive_quantile=0.80)
     out.to_parquet(p.out_path, index=False)
 
     print("✅ Wrote:", p.out_path)
     print("Date range:", min_date.date(), "→", max_date.date())
     print("as_of_dates:", len(as_of_dates), "| rows:", len(out))
-    print("positive_rate:", round(out["high_spend_next_30d"].mean(), 3))
-    print("threshold:", out["high_spend_threshold"].iloc[0])
+    # print("positive_rate:", round(out["high_spend_next_30d"].mean(), 3))
+    # print("threshold:", out["high_spend_threshold"].iloc[0])
+    print("positive_rate:", round(out["spend_spike_next_30d"].mean(), 3))
+    print("threshold:", out["spike_ratio_threshold"].iloc[0])
 
 
 if __name__ == "__main__":

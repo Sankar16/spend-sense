@@ -114,10 +114,13 @@ def main():
     train_df, test_df = time_split(df, test_frac=0.2)
 
     X_train = train_df[FEATURES_NUM + FEATURES_CAT]
-    y_train = train_df["high_spend_next_30d"].astype(int)
+    # y_train = train_df["high_spend_next_30d"].astype(int)
+    y_train = train_df["spend_spike_next_30d"].astype(int)
+
 
     X_test = test_df[FEATURES_NUM + FEATURES_CAT]
-    y_test = test_df["high_spend_next_30d"].astype(int)
+    # y_test = test_df["high_spend_next_30d"].astype(int)
+    y_test  = test_df["spend_spike_next_30d"].astype(int)
 
     pre = build_preprocessor()
 
