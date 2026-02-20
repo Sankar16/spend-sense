@@ -120,9 +120,7 @@ def main():
     )
 
     # Define spike based on counterfactual ratio (NOT the clipped spike_ratio_next_30d column)
-    exp["spike_ratio_cf"] = (exp["next_30d_spend_cf"] + 1.0) / (exp[EXPENSE_PRE] + 1.0)
-    spike_thr = float(exp["spike_ratio_cf"].quantile(0.80))
-    exp["spike_cf"] = (exp["spike_ratio_cf"] >= spike_thr).astype(int)
+    obs["spike_obs"] = (obs["next_30d_spend_obs"] >= spike_thr).astype(int)
     # -----------------------------
     # Estimator 1: A/B difference in spike rate (ATE on binary)
     # -----------------------------
@@ -172,7 +170,7 @@ def main():
     obs.loc[obs["treatment_obs"] == 1, "next_30d_spend_obs"] *= (1.0 - TRUE_SPEND_REDUCTION)
     obs["spike_ratio_obs"] = (obs["next_30d_spend_obs"] + 1.0) / (obs[EXPENSE_PRE] + 1.0)
     obs["spike_obs"] = (obs["spike_ratio_obs"] >= spike_thr).astype(int)
-    
+
     # Naive difference (biased)
     naive_spike = float(obs.loc[obs["treatment_obs"] == 1, "spike_obs"].mean() -
                         obs.loc[obs["treatment_obs"] == 0, "spike_obs"].mean())
