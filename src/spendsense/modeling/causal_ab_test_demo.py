@@ -4,10 +4,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
-
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 
@@ -41,7 +40,6 @@ FEATURES_NUM = [
 ]
 FEATURES_CAT = ["top_category_30d"]
 
-RATIO_COL = "spike_ratio_next_30d"
 EXPENSE_PRE = "expense_total_30d"
 EXPENSE_POST = "next_30d_expense_total"
 
@@ -77,7 +75,8 @@ def main():
     pre = bundle["preprocess"]
     model = bundle["model"]
 
-    thr = read_xgb_threshold(p.metrics_path)
+    # Use model threshold to define "eligible" high-risk cohort
+    risk_thr = read_xgb_threshold(p.metrics_path)
 
     # Score everyone
     X = df[FEATURES_NUM + FEATURES_CAT].copy()
@@ -85,7 +84,7 @@ def main():
     df["risk_proba"] = model.predict_proba(X_t)[:, 1]
 
     # Define experiment population: high-risk users
-    df["eligible"] = (df["risk_proba"] >= thr).astype(int)
+    df["eligible"] = (df["risk_proba"] >= risk_thr).astype(int)
     eligible = df[df["eligible"] == 1].copy()
 
     # Use a time slice for "experiment period" (e.g., last 15% dates = test-like period)
@@ -100,16 +99,15 @@ def main():
     rng = np.random.default_rng(7)
     exp["treatment"] = 0
 
-    for d, g in exp.groupby("as_of_date"):
-        idx = g.index.to_numpy(copy=True)
+    for _, g in exp.groupby("as_of_date"):
+        idx = g.index.to_numpy(copy=True)  # writable
         rng.shuffle(idx)
         half = len(idx) // 2
         exp.loc[idx[:half], "treatment"] = 1  # treatment group
 
     # -----------------------------
-    # SIMULATE true causal effect (since we don't have real intervention logs)
-    # Example: alert reduces next 30-day spend by 12% among treated (only in experiment)
-    # This creates a ground truth so our estimators can be validated.
+    # SIMULATE true causal effect (because we don't have real intervention logs)
+    # Example: alert reduces next 30-day spend by 12% among treated
     # -----------------------------
     TRUE_SPEND_REDUCTION = 0.12  # 12% reduction
     exp["next_30d_spend_cf"] = exp[EXPENSE_POST].astype(float)
@@ -119,8 +117,13 @@ def main():
         exp.loc[exp["treatment"] == 1, "next_30d_spend_cf"] * (1.0 - TRUE_SPEND_REDUCTION)
     )
 
-    # Define spike based on counterfactual ratio (NOT the clipped spike_ratio_next_30d column)
-    obs["spike_obs"] = (obs["next_30d_spend_obs"] >= spike_thr).astype(int)
+    # -----------------------------
+    # Define spike outcome using ABSOLUTE spend (stable vs ratios when baseline≈0)
+    # Use q80 of counterfactual spend within experiment cohort
+    # -----------------------------
+    spike_spend_thr = float(exp["next_30d_spend_cf"].quantile(0.80))
+    exp["spike_cf"] = (exp["next_30d_spend_cf"] >= spike_spend_thr).astype(int)
+
     # -----------------------------
     # Estimator 1: A/B difference in spike rate (ATE on binary)
     # -----------------------------
@@ -130,10 +133,7 @@ def main():
     spike_rate_t = float(t["spike_cf"].mean())
     spike_rate_c = float(c["spike_cf"].mean())
     ate_spike = spike_rate_t - spike_rate_c
-
-    ci_spike = bootstrap_ci(
-        t["spike_cf"].to_numpy(), c["spike_cf"].to_numpy(), fn=np.mean
-    )
+    ci_spike = bootstrap_ci(t["spike_cf"].to_numpy(), c["spike_cf"].to_numpy(), fn=np.mean)
 
     # -----------------------------
     # Estimator 2: A/B difference in spend (ATE on continuous)
@@ -146,8 +146,7 @@ def main():
     )
 
     # -----------------------------
-    # Estimator 3: DiD on spend using pre/post
-    # delta = post - pre, then compare deltas
+    # Estimator 3: DiD on spend using pre/post (delta = post - pre)
     # -----------------------------
     t_delta = (t["next_30d_spend_cf"] - t[EXPENSE_PRE]).to_numpy()
     c_delta = (c["next_30d_spend_cf"] - c[EXPENSE_PRE]).to_numpy()
@@ -156,26 +155,27 @@ def main():
 
     # -----------------------------
     # Observational demo: biased treatment assignment + IPW correction
-    # (Shows why causal inference matters when randomization isn't possible)
     # -----------------------------
     obs = exp.copy()
 
-    # biased assignment: higher risk_proba => more likely treated
-    # (creates confounding)
+    # biased assignment: higher risk_proba => more likely treated (creates confounding)
     p_treat = np.clip(0.05 + 0.9 * obs["risk_proba"], 0.05, 0.95)
     obs["treatment_obs"] = (rng.random(len(obs)) < p_treat).astype(int)
 
     # simulate same true effect on treated_obs
     obs["next_30d_spend_obs"] = obs[EXPENSE_POST].astype(float)
     obs.loc[obs["treatment_obs"] == 1, "next_30d_spend_obs"] *= (1.0 - TRUE_SPEND_REDUCTION)
-    obs["spike_ratio_obs"] = (obs["next_30d_spend_obs"] + 1.0) / (obs[EXPENSE_PRE] + 1.0)
-    obs["spike_obs"] = (obs["spike_ratio_obs"] >= spike_thr).astype(int)
+
+    # define spike using SAME spend threshold as RCT definition
+    obs["spike_obs"] = (obs["next_30d_spend_obs"] >= spike_spend_thr).astype(int)
 
     # Naive difference (biased)
-    naive_spike = float(obs.loc[obs["treatment_obs"] == 1, "spike_obs"].mean() -
-                        obs.loc[obs["treatment_obs"] == 0, "spike_obs"].mean())
+    naive_spike = float(
+        obs.loc[obs["treatment_obs"] == 1, "spike_obs"].mean()
+        - obs.loc[obs["treatment_obs"] == 0, "spike_obs"].mean()
+    )
 
-    # IPW: estimate propensity via logistic regression using risk + features (simple)
+    # IPW: estimate propensity via logistic regression using a few covariates
     covars = ["risk_proba", EXPENSE_PRE, "expense_growth_ratio_7d", "essentials_share_30d", "large_txn_cnt_30d"]
     Xp = obs[covars].fillna(0.0).to_numpy()
     yp = obs["treatment_obs"].to_numpy()
@@ -203,11 +203,11 @@ def main():
     results = pd.DataFrame(
         [
             {
-                "cohort_rows": len(exp),
-                "unique_users": exp["user_id"].nunique(),
-                "threshold_risk_proba": thr,
-                "spike_ratio_label_thr_demo": spike_thr,
-                "true_spend_reduction": TRUE_SPEND_REDUCTION,
+                "cohort_rows": int(len(exp)),
+                "unique_users": int(exp["user_id"].nunique()),
+                "threshold_risk_proba": float(risk_thr),
+                "spike_spend_threshold_demo": float(spike_spend_thr),
+                "true_spend_reduction": float(TRUE_SPEND_REDUCTION),
                 # A/B
                 "ab_spike_rate_treat": spike_rate_t,
                 "ab_spike_rate_ctrl": spike_rate_c,
