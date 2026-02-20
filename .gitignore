@@ -227,3 +227,7 @@ reports/predictions*.csvreports/best_threshold_*.txt
 reports/best_model.txt
 reports/best_threshold.txt
 reports/label_threshold_train_q80.txt
+
+# Local training artifacts
+reports/best_threshold_logreg.txt
+reports/predictions_spike.csv
