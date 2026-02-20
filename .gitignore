@@ -223,4 +223,7 @@ reports/figures/*.png
 # Model artifacts + generated predictions
 reports/models/*.joblib
 reports/models/*.pkl
-reports/predictions*.csv
+reports/predictions*.csvreports/best_threshold_*.txt
+reports/best_model.txt
+reports/best_threshold.txt
+reports/label_threshold_train_q80.txt
