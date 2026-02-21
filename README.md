@@ -220,6 +220,7 @@ python -m src.spendsense.modeling.causal_ab_test_demo
 ```
 
 ## What to look at
-- `reports/baseline_metrics.csv` — model metrics (LogReg/RF/XGB)
-- `reports/sensitivity_outliers.csv` — robustness check
-- `reports/causal_ab_results.csv` — causal + A/B impact estimates
+## What to look at
+- [`reports/baseline_metrics.csv`](reports/baseline_metrics.csv) — model metrics (LogReg/RF/XGB)
+- [`reports/sensitivity_outliers.csv`](reports/sensitivity_outliers.csv) — robustness check
+- [`reports/causal_ab_results.csv`](reports/causal_ab_results.csv) — causal + A/B impact estimates
