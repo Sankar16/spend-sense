@@ -6,7 +6,7 @@ It includes a production-style pipeline (raw → canonical → marts), dashboard
 
 **Key results**
 - **Spike prediction model (XGBoost):** ROC-AUC ≈ **0.864**, PR-AUC ≈ **0.559** (time-based split)
-- At threshold 0.6256: Precision ≈ 0.50, Recall ≈ 0.71, F1 ≈ 0.59 (test)
+- **Operating point (alert threshold = 0.6256):** Precision ≈ **0.50**, Recall ≈ **0.71**, F1 ≈ **0.59** (test)
 - **Outlier robustness:** Removing the top spender / top 1% spenders keeps metrics stable (PR-AUC stays ≈ **0.559–0.563**)
 - **Causal demo (simulated intervention):** A/B + DiD show a **~$190 reduction** in next-30-day spend (CI fully negative) under a 12% treatment effect assumption.
 
